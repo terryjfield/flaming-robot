@@ -29,6 +29,10 @@
 #define CHAR_DEF_MATRIX_COLUMN_COUNT CHAR_WIDTH + 1 // Number of pixel columns for a character plus 1 for the ASCII character itself
 #define CHAR_DEF_MATRIX_ROW_COUNT 27 // Number of characters defined
 
+// Delays for Persistence of Visions
+#define INTERCOLUMN_DELAY 2
+#define SCROLLING_DELAY 60
+
 // The bitmaps for the characters are stored as an array of bytes. Each byte is a bitmask that
 // defines the pixels that are turned on in a column. In the example below, the letter 'a' is defined
 // as 6 bytes. The first column's value is 0, denoting an inter-character column space where no pixels 
@@ -197,7 +201,8 @@ void scrollWindow(char msg[])
   while (true)
   { 
     fillHWbuffer(windowPtr, msgMatrix, hwBuffer);
-    displayHWbuffer(hwBuffer, 2, 60);
+    displayHWbuffer(hwBuffer, INTERCOLUMN_DELAY, SCROLLING_DELAY);
+    
     windowPtr++;
     
     if (windowPtr % CHAR_WIDTH == 0)
@@ -228,7 +233,7 @@ void scrollWindow(char msg[])
 
 void testMsg()
 {
-  scrollWindow(" slurp");
+  scrollWindow(" hi how are you");
 }
 
 void loop() {
