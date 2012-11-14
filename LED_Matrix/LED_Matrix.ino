@@ -1,14 +1,35 @@
 /*
   LED_Matrix
   
+  Author: Terry Field
+  Date  : 12 November 2012
+  
   Board: Arduino Uno
   
   Purpose: This program drives an 8x8 LED matrix, to scroll a message.
   
   Circuit: The Arduino drives transistors that are responsible for a single row/column of the matrix.
-  Turning on a given row/column combination lights up the LED at the intersection of the row/column.
+  Turning on a given row/column combinations lights up the LED at the intersection of the row/column.
+  Only one column at a time is turned on, and persistence of vision makes it look like 
+
+  Overview:
   
- */
+  This program makes use of 2 matrices, the message matrix and the hardware matrix. The message
+  matrix holds a bitmap of the current 3 characters being displayed while the hardware matrix 
+  represents the 8x8 LED matrix and is a "sliding window" on top of the message matrix. "Sliding"
+  the the hardware matrix over the message matrix gives the appearance of the characters scrolling
+  to the left.
+
+  As the sliding window moves to the right, and a character moves "offstage", the next character in
+  the message string is inserted in the message matrix behind the left edge of the sliding window.
+  
+  As the sliding window moves to the right it will run out of message matrix - at this point it wraps
+  around to the beginning of the message matrix. In this respect the message matrix is a ring buffer.
+
+  The function displayHWBuffer is responsible for taking the hardware matrix and multiplexing the transistors
+  on and off to match the state of the hardware matrix.
+  
+*/
 
 // The hardware is composed of an 8x8 matrix of LEDs 
 #define NUM_HW_ROWS 8    // Number of hardware (LED) rows
@@ -25,7 +46,7 @@
 #define MAX_CHARS_DISPLAYED 3 // Need to display at most 3 characters (or portions of in the HW matrix)
 #define NUM_MSG_COLUMNS CHAR_WIDTH * MAX_CHARS_DISPLAYED // Number of columns in the message buffer matrix
 
-// Definitions of the characters
+// Definitions of the matrix that contains character definition bitmaps
 #define CHAR_DEF_MATRIX_COLUMN_COUNT CHAR_WIDTH + 1 // Number of pixel columns for a character plus 1 for the ASCII character itself
 #define CHAR_DEF_MATRIX_ROW_COUNT 27 // Number of characters defined
 
@@ -54,7 +75,7 @@
 // 1        *  *  *  *
 //
 
-// Matrix containing 
+// Matrix containing character bitmap definitions
 byte charDefMatrix[CHAR_DEF_MATRIX_ROW_COUNT][CHAR_DEF_MATRIX_COLUMN_COUNT] 
   = {'a',0,2,21,21,21,15,
      'b',0,255,5,9,9,6,
@@ -88,6 +109,13 @@ byte charDefMatrix[CHAR_DEF_MATRIX_ROW_COUNT][CHAR_DEF_MATRIX_COLUMN_COUNT]
 byte row[] = {2,3,4,5,6,7,8,9}; // Arduino pins #s for rows
 byte column[] = {A3, 10, 11, 12, 13, A0, A1, A2}; // Arduino pin #s for columns
 
+/**************************************************************
+  Function: setup
+  
+  Purpose: gets called once before loop(), sets up Arduino
+  digital pins for output.
+  
+  ************************************************************* */
 void setup() 
 {
   // Set digital pins for output
@@ -102,6 +130,15 @@ void setup()
   }
 }
 
+/**************************************************************
+  Function: clearMsgMatrix
+  
+  Purpose: sets all element of the 2D-matrix to 0 (off)
+  
+  Input/Output:
+  msgMatrix: 2-D matrix representing LED array
+  
+  ************************************************************* */
 void clearMsgMatrix(byte msgMatrix[][NUM_MSG_COLUMNS])
 {
   for (int r = 0; r < NUM_HW_ROWS; r++)
@@ -113,6 +150,22 @@ void clearMsgMatrix(byte msgMatrix[][NUM_MSG_COLUMNS])
   }
 }
 
+
+/**************************************************************
+  Function: insertCharInMatrix
+  
+  Purpose: this function populates the message matrix with a
+    character bitmap.
+  
+  Inputs:
+  c        : next character in the message to insert into msgMatrix
+  columnPtr: indicates where in msgMatrix to insert the character 
+             bitmap
+  
+  Inputs/Outputs:
+  msgMatrix: 2-D matrix representing message matrix
+  
+  ************************************************************* */
 void insertCharInMatrix(char c, byte msgMatrix[][NUM_MSG_COLUMNS], byte columnPtr)
 {
   byte powerOfTwo;
@@ -121,17 +174,20 @@ void insertCharInMatrix(char c, byte msgMatrix[][NUM_MSG_COLUMNS], byte columnPt
   
   for (int j = 0; j < CHAR_DEF_MATRIX_ROW_COUNT; j++) // loop looking for a match in the character set
   {
-    if (c == charDefMatrix[j][0]) // do we have a match
+    if (c == charDefMatrix[j][0]) // do we have a match?
     { 
-      // turn on bits in the column
+      // turn on bits in the column, start at 1 because 0 is where the ASCII character we matched is
       for (int col = 1; col < CHAR_DEF_MATRIX_COLUMN_COUNT; col++)
       {
         powerOfTwo = 1;
+        
+        // Set bits on for each row for a given column
         for (int row = 0; row < CHAR_HEIGHT; row++)
         {
           msgMatrix[NUM_HW_ROWS - row - 1][currentColumnPtr] = charDefMatrix[j][col] & powerOfTwo;
           powerOfTwo = powerOfTwo * 2;
         } // row
+        
         currentColumnPtr++;
       } // col
       break;
@@ -139,10 +195,25 @@ void insertCharInMatrix(char c, byte msgMatrix[][NUM_MSG_COLUMNS], byte columnPt
   } //for
 }
 
+/**************************************************************
+  Function: displayHWBuffer
+  
+  Purpose: this function turns sets up the Arduino digital outputs
+    connected to transistors to turn on a column at a time for a
+    brief time. Persistence of vision makes it appear that all
+    columns are lit simultaneously.
+  
+  Inputs:
+  HWMatrix  : matrix representing the LED matrix
+  columnTime: time in ms to light each column
+  interval  : time to display HW matrix before returning
+  
+  ************************************************************* */
 void displayHWbuffer(byte HWmatrix[][NUM_HW_COLUMNS], int columnTime, int interval)
 {
-  unsigned long currentMillis  = millis();
+  unsigned long currentMillis  = millis(); // current time in ms
   unsigned long previousMillis = currentMillis;
+  
   
   while (currentMillis - previousMillis < interval)
   {    
@@ -169,6 +240,22 @@ void displayHWbuffer(byte HWmatrix[][NUM_HW_COLUMNS], int columnTime, int interv
   } // while
 }
 
+
+/**************************************************************
+  Function: fillHWBuffer
+  
+  Purpose: this function implements the sliding window - it 
+    copies the visible portion of the characher bitmap in the 
+    "window" to the HW buffer. 
+  
+  Inputs:
+  windowColPtr : left edge of the sliding window
+  msgMatrix    : message bitmap matrix
+  
+  Output:
+  HW_Matrix : matrix representing LED matrix
+  
+  ************************************************************* */
 void fillHWbuffer(byte windowColPtr, byte msgMatrix[][NUM_MSG_COLUMNS], byte HW_Matrix[][NUM_HW_COLUMNS] )
 {
   byte workingWindowColPtr = windowColPtr;
@@ -190,23 +277,25 @@ void fillHWbuffer(byte windowColPtr, byte msgMatrix[][NUM_MSG_COLUMNS], byte HW_
 
 void scrollWindow(char msg[])
 {  
-  byte msgMatrix[NUM_HW_ROWS][NUM_MSG_COLUMNS]; // Matrix contains message, i.e. multiple characters
+  byte msgMatrix[NUM_HW_ROWS][NUM_MSG_COLUMNS]; // Matrix contains message, i.e. multiple characters' bitmaps
 
-  byte hwBuffer[NUM_HW_ROWS][NUM_HW_COLUMNS];
-  byte tailPtr = 0;    // tail of the message array
-  byte windowPtr = 0;  // pointer into message array, leftmost column to display
+  byte hwBuffer[NUM_HW_ROWS][NUM_HW_COLUMNS]; // matrix that maps to LED matrix
+  byte tailPtr = 0;    // tail of the message matrix, place to insert next character bitmap
+  byte windowPtr = 0;  // pointer into message matrix, leftmost column to display
   byte msgCharPtr = 0; // pointer into message, next character to add to message array
   
-  clearMsgMatrix(msgMatrix);
+  clearMsgMatrix(msgMatrix); // set all to 0
   while (true)
   { 
     fillHWbuffer(windowPtr, msgMatrix, hwBuffer);
     displayHWbuffer(hwBuffer, INTERCOLUMN_DELAY, SCROLLING_DELAY);
     
-    windowPtr++;
+    windowPtr++; // advance visible window 1 column to give scrolling effect
     
-    if (windowPtr % CHAR_WIDTH == 0)
+    if (windowPtr % CHAR_WIDTH == 0) // have we advanced a complete character width?
     {
+      // Okay, we need to insert the next character into the msgMatrix
+      
       if (msg[msgCharPtr] == '\0') // are we at the end of the message string?
       {
         msgCharPtr = 0; // if so, reset to beginning of message string
@@ -214,18 +303,19 @@ void scrollWindow(char msg[])
       
       insertCharInMatrix(msg[msgCharPtr], msgMatrix, tailPtr);
       
-      msgCharPtr++;
+      msgCharPtr++; // point to next character in the message
       
-      tailPtr += CHAR_WIDTH;
+      // we inserted a new character, need to move the tail a character's width
+      tailPtr += CHAR_WIDTH; 
       if (tailPtr == NUM_MSG_COLUMNS) // at the end of the msgMatrix
       {
-        tailPtr = 0;
+        tailPtr = 0; // wrap to the beginning of the msgMatrix
       }
-    }
+    } 
     
-    if (windowPtr == NUM_MSG_COLUMNS)
+    if (windowPtr == NUM_MSG_COLUMNS) 
     {
-      windowPtr = 0;
+      windowPtr = 0; //reset pointer to beginning if we reach the end of the matrix
     }
     
   } //while
@@ -233,7 +323,7 @@ void scrollWindow(char msg[])
 
 void testMsg()
 {
-  scrollWindow(" hi how are you");
+  scrollWindow(" hi how are you today");
 }
 
 void loop() {
