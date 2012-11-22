@@ -10,7 +10,8 @@
   
   Circuit: The Arduino drives transistors that are responsible for a single row/column of the matrix.
   Turning on a given row/column combinations lights up the LED at the intersection of the row/column.
-  Only one column at a time is turned on, and persistence of vision makes it look like 
+  Only one column at a time is turned on, and persistence of vision makes it look like LEDs are turned
+  on in every column at once.
 
   Overview:
   
